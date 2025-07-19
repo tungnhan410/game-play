@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Zombie Wave Shooter</title>
+  <style>
+    body { margin: 0; background: black; }
+    #gameContainer { width: 100%; height: 100vh; display: flex; align-items: center; justify-content: center; }
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3.70.0/dist/phaser.min.js"></script>
+</head>
+<body>
+<div id="gameContainer"></div>
+<script>
+const config = {
+  type: Phaser.AUTO,
+  width: 800,
+  height: 500,
+  backgroundColor: '#222',
+  parent: 'gameContainer',
+  physics: { default: 'arcade', arcade: { debug: false } },
+  scene: { preload, create, update }
+};
+
+let player, cursors, bullets, zombies, lastFired = 0;
+let health = 100, healthText, score = 0, scoreText;
+let gunLevel = 1, fireRate = 500, damage = 10;
+let gameOver = false, selectedLevel = null;
+let shopOpen = false, shopUI = [], multiShotCount = 2;
+let wave = 1, waveText, zombiesRemaining = 0;
+
+const zombieTypes = {
+  normal: { speed: 60, health: 30 },
+  fast: { speed: 120, health: 20 },
+  tank: { speed: 40, health: 60 }
+};
+
+const game = new Phaser.Game(config);
+
+function preload() {
+  this.load.image('player', 'https://i.imgur.com/sZKBGXj.png');
+  this.load.image('zombie', 'https://i.imgur.com/jaqF1xG.png');
+  this.load.image('bullet', 'https://i.imgur.com/vzTtVvj.png');
+  this.load.image('button', 'https://i.imgur.com/88NkuCv.png');
+  this.load.image('heal', 'https://i.imgur.com/7n3XQUR.png');
+}
+
+function create() {
+  showLevelSelect.call(this);
+  this.input.keyboard.on('keydown-B', () => {
+    if (!gameOver) toggleShop.call(this);
+  });
+}
+
+function showLevelSelect() {
+  const title = this.add.text(400, 80, "Chọn Màn", { fontSize: "32px", color: "#fff" }).setOrigin(0.5);
+  ["Level 1", "Level 2", "Level 3"].forEach((label, index) => {
+    const btn = this.add.image(400, 180 + index * 100, 'button').setInteractive().setScale(2);
+    const txt = this.add.text(0, 0, label, { fontSize: "24px", color: "#fff" });
+    Phaser.Display.Align.In.Center(txt, btn);
+    btn.on('pointerdown', () => {
+      selectedLevel = index + 1;
+      this.children.getAll().forEach(c => c.destroy());
+      startGame.call(this);
+    });
+  });
+}
+
+function startGame() {
+  health = 100;
+  score = 0;
+  gunLevel = 1;
+  fireRate = 500;
+  damage = 10;
+  multiShotCount = 2;
+  wave = 1;
+  zombiesRemaining = 0;
+  gameOver = false;
+  shopOpen = false;
+  shopUI = [];
+
+  player = this.physics.add.sprite(100, 400, 'player').setScale(1.2).setCollideWorldBounds(true);
+  bullets = this.physics.add.group();
+  zombies = this.physics.add.group();
+
+  cursors = this.input.keyboard.createCursorKeys();
+  this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.A);
+  this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.D);
+  this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
+
+  healthText = this.add.text(10, 10, "HP: " + health, { fontSize: "20px", fill: "#fff" });
+  scoreText = this.add.text(650, 10, "Score: 0", { fontSize: "20px", fill: "#fff" });
+  waveText = this.add.text(350, 10, "Wave: 1", { fontSize: "20px", fill: "#fff" });
+
+  this.physics.add.overlap(bullets, zombies, (bullet, zombie) => {
+    bullet.destroy();
+    zombie.hp -= damage;
+    if (zombie.hp <= 0) {
+      zombie.destroy();
+      score += 10;
+      scoreText.setText("Score: " + score);
+      zombiesRemaining--;
+
+      if (zombiesRemaining <= 0) {
+        wave++;
+        waveText.setText("Wave: " + wave);
+        startWave.call(this);
+      }
+    }
+  });
+
+  this.physics.add.overlap(player, zombies, (p, z) => {
+    z.destroy();
+    health -= 10;
+    healthText.setText("HP: " + health);
+    if (health <= 0) showGameOver.call(this);
+  });
+
+  startWave.call(this);
+}
+
+function update(time) {
+  if (gameOver || !player || shopOpen) return;
+
+  const keyA = this.input.keyboard.addKey('A');
+  const keyD = this.input.keyboard.addKey('D');
+  const keySpace = this.input.keyboard.addKey('SPACE');
+
+  if (keyA.isDown) player.setVelocityX(-200);
+  else if (keyD.isDown) player.setVelocityX(200);
+  else player.setVelocityX(0);
+
+  if (keySpace.isDown && time > lastFired + fireRate) {
+    shootBullet.call(this);
+    lastFired = time;
+  }
+
+  zombies.children.iterate(z => {
+    if (z && z.active) this.physics.moveToObject(z, player, z.speed);
+  });
+}
+
+function spawnZombie() {
+  let type = 'normal';
+  if (selectedLevel === 2) type = Phaser.Math.RND.pick(['normal', 'fast']);
+  else if (selectedLevel === 3) type = Phaser.Math.RND.pick(['normal', 'fast', 'tank']);
+
+  const data = zombieTypes[type];
+  const z = zombies.create(800, Phaser.Math.Between(300, 450), 'zombie').setScale(1.2);
+  z.hp = data.health;
+  z.speed = data.speed;
+}
+
+function startWave() {
+  const count = 5 + wave * 3;
+  zombiesRemaining = count;
+  for (let i = 0; i < count; i++) {
+    setTimeout(() => {
+      spawnZombie.call(game.scene.scenes[0]);
+    }, i * 300);
+  }
+}
+
+function shootBullet() {
+  const y = player.y;
+  const x = player.x + 30;
+  for (let i = 0; i < multiShotCount; i++) {
+    const offset = (i - (multiShotCount - 1) / 2) * 10;
+    const bullet = bullets.create(x, y + offset, 'bullet');
+    bullet.setVelocityX(400 + gunLevel * 50);
+  }
+}
+
+function showGameOver() {
+  gameOver = true;
+  player.setTint(0xff0000);
+  this.add.text(300, 200, "GAME OVER", { fontSize: "36px", fill: "red" });
+  const btn = this.add.image(400, 300, 'button').setInteractive().setScale(2);
+  const txt = this.add.text(0, 0, "Chơi lại", { fontSize: "24px", color: "#fff" });
+  Phaser.Display.Align.In.Center(txt, btn);
+  btn.on('pointerdown', () => this.scene.restart());
+}
+
+function toggleShop() {
+  if (shopOpen) {
+    shopUI.forEach(e => e.destroy());
+    shopOpen = false;
+    return;
+  }
+  shopOpen = true;
+  const bg = this.add.rectangle(400, 250, 500, 320, 0x000000, 0.8);
+  shopUI.push(bg);
+  const title = this.add.text(400, 120, "SHOP NÂNG CẤP", { fontSize: "26px", color: "#fff" }).setOrigin(0.5);
+  shopUI.push(title);
+
+  const upgrades = [
+    { label: "🔫 Tốc độ bắn (-50ms)", cost: 30, action: () => { if (fireRate > 200) fireRate -= 50; } },
+    { label: "💥 Tăng sát thương (+5)", cost: 50, action: () => { damage += 5; } },
+    {
+      label: `🔫🔫🔫 Bắn ${multiShotCount + 1} viên`, cost: 70 + multiShotCount * 30,
+      action: () => { if (multiShotCount < 5) multiShotCount++; }
+    },
+    {
+      label: "💖 Hồi máu (+20)", cost: 40,
+      action: () => {
+        if (health < 100) {
+          health = Math.min(health + 20, 100);
+          healthText.setText("HP: " + health);
+        }
+      }
+    }
+  ];
+
+  upgrades.forEach((upg, i) => {
+    const btn = this.add.image(400, 180 + i * 60, 'button').setInteractive().setScale(2);
+    const txt = this.add.text(0, 0, upg.label + " - " + upg.cost + "đ", { fontSize: "20px", color: "#fff" });
+    Phaser.Display.Align.In.Center(txt, btn);
+    btn.on('pointerdown', () => {
+      if (score >= upg.cost) {
+        score -= upg.cost;
+        upg.action();
+        scoreText.setText("Score: " + score);
+        toggleShop.call(this);
+      }
+    });
+    shopUI.push(btn, txt);
+  });
+}
+</script>
+</body>
+</html>
